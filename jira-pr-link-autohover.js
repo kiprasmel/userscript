@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Jira PR link auto-hover
 // @namespace    http://tampermonkey.net/
-// @version      0.2.2
+// @version      0.2.3
 // @updateURL    https://raw.githubusercontent.com/kiprasmel/userscript/master/jira-pr-link-autohover.js
 // @downloadURL  https://raw.githubusercontent.com/kiprasmel/userscript/master/jira-pr-link-autohover.js
 // @description  try to take over the world!
@@ -27,12 +27,12 @@ function init() {
 		const rerun = () => {
 			const newSearch = window.location.search;
 			if (newSearch && lastSearch !== newSearch) {
-				lastSearch = newSearch;
 				run();
 			}
+			lastSearch = newSearch
 		};
 
-		setInterval(rerun, 1000);
+		setInterval(rerun, 300);
 		return;
 	}
 }
