@@ -102,15 +102,21 @@ async function fetchCommitsWithPRs(commitListLength) {
 	/**
 	 * flatten data
 	 */
-	const commits = res.data.repository.ref.target.history.edges
-		.map((e) => e.node)
-		.map((c) =>
-			!("associatedPullRequests" in c)
-				? c
-				: Object.assign(c, {
-						associatedPullRequests: c.associatedPullRequests.edges.map((e) => e.node), // eslint-disable-line indent
-				  })
-		);
+	/* eslint-disable indent */
+	const commits = flatEdges(res.data.repository.ref.target.history).map((c) =>
+		!("associatedPullRequests" in c)
+			? c //
+			: Object.assign(c, {
+					associatedPullRequests: flatEdges(c.associatedPullRequests).map((pr) =>
+						!("closingIssuesReferences" in pr)
+							? pr //
+							: Object.assign(pr, {
+									closingIssuesReferences: flatEdges(pr.closingIssuesReferences),
+							  })
+					),
+			  })
+	);
+	/* eslint-enable indent */
 	log({ commits });
 
 	return commits;
@@ -206,6 +212,10 @@ function getVariables(commitListLength) {
 
 		first,
 	};
+}
+
+function flatEdges(x) {
+	return x.edges.map((e) => e.node);
 }
 
 function zip(A, B, zipper = (x) => x) {
