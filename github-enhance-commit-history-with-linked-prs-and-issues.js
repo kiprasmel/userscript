@@ -34,33 +34,120 @@ async function init() {
 		commitListLength: commitList.length,
 	});
 
-	log({ commitList, query, variables });
-
-	const datas = commitList
-		.map((el) => el.attributes["data-channel"].nodeValue)
-		.map((x) => x.split("--")[0])
-		.map((x) => atob(x))
-		.map((x) => JSON.parse(x))
-		.map((x) => x.c.split(":")[3]);
-
-	log({ datas });
-
-	const body = JSON.stringify({
-		query,
-		variables,
+	const commitElements = commitList.map((el) => {
+		const base64 = el.attributes["data-channel"].nodeValue.split("--")[0];
+		const { c: content } = JSON.parse(atob(base64));
+		const oid = content.split(":")[3];
+		return {
+			oid,
+			el,
+		};
 	});
 
-	log({ body });
+	log({ commitElements });
 
 	const res = await fetch("https://api.github.com/graphql", {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${authToken}`,
 		},
-		body,
+		body: JSON.stringify({
+			query,
+			variables,
+		}),
 	}).then((r) => r.json());
 
-	log("graphql res", res);
+	const commits = res.data.repository.ref.target.history.edges
+		.map((e) => e.node)
+		.map((c) =>
+			!("associatedPullRequests" in c)
+				? c
+				: Object.assign(c, {
+						associatedPullRequests: c.associatedPullRequests.edges.map((e) => e.node), // eslint-disable-line indent
+				  })
+		);
+
+	log({ commits });
+
+	console.assert(commitElements.length === commits.length);
+
+	const zipped = [];
+	for (let i = 0; i < commits.length; i++) {
+		const el = commitElements[i];
+		const c = commits[i];
+
+		const hasGithubPR = !!c.associatedPullRequests?.length;
+
+		zipped.push({
+			el,
+			c,
+			hasGithubPR,
+		});
+	}
+
+	zipped.forEach(({ el, c }) => {
+		console.assert(el.oid === c.oid);
+	});
+	console.log("all commits matched");
+
+	zipped //
+		.filter(({ hasGithubPR }) => hasGithubPR)
+		.forEach(({ el, c }) => render(el, c));
+}
+
+function render(el, c) {
+	/**
+	 *
+	 */
+	Object.assign(el.el.style, {
+		position: "relative",
+	});
+
+	const cont = renderContainer();
+	el.el.appendChild(cont);
+
+	const dx = -61 - Math.floor(cont.getBoundingClientRect().width);
+	log({ dx, boundingRect: cont.getBoundingClientRect() });
+	Object.assign(cont.style, {
+		transform: `translate(${dx}px, -9px)`,
+	});
+
+	function renderContainer() {
+		/**
+		 *
+		 */
+		const container = document.createElement("div");
+
+		Object.assign(container.style, {
+			position: "absolute",
+			display: "flex",
+			// backgroundColor: "red",
+			width: "auto",
+			height: "100%",
+		});
+
+		container.innerHTML = `
+					<span>
+						prs:
+					</span>
+					&nbsp;
+					<div>
+						${renderPRs()}
+					</div>
+				`.trim();
+
+		return container;
+
+		function renderPRs() {
+			return c.associatedPullRequests.map((pr) =>
+				`
+							<div>
+								<a href="${pr.url}">#${pr.number}</a>
+							</div>
+						`.trim()
+			);
+		}
+	}
 }
 
 function log(...xs) {
