@@ -254,17 +254,12 @@ function render(el, c) {
 
 		Object.assign(container.style, {
 			position: "absolute",
-			display: "flex",
 			width: "auto",
 			height: "100%",
 		});
 
 		container.innerHTML = `
-			<span>
-				prs:
-			</span>
-			&nbsp;
-			<div>
+			<div style="display: flex; width: auto; height: 100%;">
 				${renderPRs()}
 			</div>
 		`.trim();
@@ -272,13 +267,47 @@ function render(el, c) {
 		return container;
 
 		function renderPRs() {
-			return c.associatedPullRequests.map((pr) =>
-				`
-					<div title="${pr.title}">
-						<a href="${pr.url}">#${pr.number}</a>
-					</div>
-				`.trim()
-			);
+			return c.associatedPullRequests.map((pr, prIdx) => {
+				const prPrefix = prIdx === 0 ? "" : `<span>, </span>`;
+
+				return `
+					<span>
+						${prPrefix}
+
+						<span title="${pr.title}">
+							<a href="${pr.url}">#${pr.number}</a>
+						</span>
+
+						${renderIssuesFixedByPR()}
+					</span>
+				`.trim();
+
+				function renderIssuesFixedByPR() {
+					const issues = !pr.closingIssuesReferences?.length //
+						? ""
+						: pr.closingIssuesReferences;
+					log({ issues });
+
+					if (!issues.length) return "";
+
+					return `
+						<span>(fix </span>${renderIssues()}<span>)</span>
+					`.trim();
+
+					function renderIssues() {
+						return issues.map((iss, issIdx) => {
+							const issPrefix = issIdx === 0 ? "" : `<span>, </span>`;
+
+							return `
+								<span>
+									${issPrefix}
+									
+									<span title="${iss.title}">
+										<a href="${iss.url}">#${iss.number}</a></span></span>`.trim();
+						});
+					}
+				}
+			});
 		}
 	}
 }
