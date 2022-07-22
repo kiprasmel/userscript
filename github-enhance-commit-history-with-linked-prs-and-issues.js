@@ -14,11 +14,19 @@
 /**
  * create an auth token yourself
  * with the "repo" scope,
- * and enable SSO if needed.
+ * and enable SSO if needed,
+ * and then paste it in here.
  *
  * https://github.com/settings/tokens/new?description=github-prs-in-commit-history&scopes=repo
+ *
+ * note that extensions update automatically (unless disabled),
+ * and in that case the `authToken` will be reset
+ * & you'll need to re-create it.
+ * will improve later.
  */
 const authToken = "";
+
+const DEBUG = true;
 
 /**
  * ---
@@ -29,22 +37,56 @@ init();
 async function init() {
 	const commitList = Array.from(document.querySelectorAll(".TimelineItem-body li"));
 
-	const query = getQuery();
-	const variables = getVariables({
-		commitListLength: commitList.length,
-	});
-
-	const commitElements = commitList.map((el) => {
-		const base64 = el.attributes["data-channel"].nodeValue.split("--")[0];
-		const { c: content } = JSON.parse(atob(base64));
-		const oid = content.split(":")[3];
-		return {
-			oid,
-			el,
-		};
-	});
-
+	/**
+	 * take already github-rendered commit elements
+	 */
+	const commitElements = commitList.map((el) => ({
+		oid: parseCommitSHAFromEl(el),
+		el,
+	}));
 	log({ commitElements });
+
+	/**
+	 * fetch enhanced data w/ commits,
+	 * their PRs if avail, and issues of the PRs of avail
+	 */
+	const commitData = await fetchCommitsWithPRs(commitList.length);
+
+	const zipped = zip(commitElements, commitData, ([el, c]) => ({
+		el,
+		c,
+		hasGithubPR: !!c.associatedPullRequests?.length,
+	}));
+
+	for (const { el, c } of zipped) {
+		console.assert(el.oid === c.oid);
+	}
+	log("all commits matched");
+
+	/**
+	 * render
+	 */
+	zipped //
+		.filter(({ hasGithubPR }) => hasGithubPR)
+		.forEach(({ el, c }) => render(el, c));
+}
+
+function parseCommitSHAFromEl(el) {
+	const base64 = el.attributes["data-channel"].nodeValue.split("--")[0];
+	const { c: content } = JSON.parse(atob(base64));
+	const oid = content.split(":")[3];
+	return oid;
+}
+
+function log(...xs) {
+	if (DEBUG) {
+		console.log(...xs);
+	}
+}
+
+async function fetchCommitsWithPRs(commitListLength) {
+	const query = getQuery();
+	const variables = getVariables(commitListLength);
 
 	const res = await fetch("https://api.github.com/graphql", {
 		method: "POST",
@@ -57,6 +99,9 @@ async function init() {
 		}),
 	}).then((r) => r.json());
 
+	/**
+	 * flatten data
+	 */
 	const commits = res.data.repository.ref.target.history.edges
 		.map((e) => e.node)
 		.map((c) =>
@@ -66,103 +111,9 @@ async function init() {
 						associatedPullRequests: c.associatedPullRequests.edges.map((e) => e.node), // eslint-disable-line indent
 				  })
 		);
-
 	log({ commits });
 
-	console.assert(commitElements.length === commits.length);
-
-	const zipped = [];
-	for (let i = 0; i < commits.length; i++) {
-		const el = commitElements[i];
-		const c = commits[i];
-
-		const hasGithubPR = !!c.associatedPullRequests?.length;
-
-		zipped.push({
-			el,
-			c,
-			hasGithubPR,
-		});
-	}
-
-	zipped.forEach(({ el, c }) => {
-		console.assert(el.oid === c.oid);
-	});
-	console.log("all commits matched");
-
-	zipped //
-		.filter(({ hasGithubPR }) => hasGithubPR)
-		.forEach(({ el, c }) => render(el, c));
-}
-
-function render(el, c) {
-	/**
-	 *
-	 */
-	Object.assign(el.el.style, {
-		position: "relative",
-	});
-
-	const cont = renderContainer();
-	el.el.appendChild(cont);
-
-	const dx = -61 - Math.floor(cont.getBoundingClientRect().width);
-	log({ dx, boundingRect: cont.getBoundingClientRect() });
-	Object.assign(cont.style, {
-		transform: `translate(${dx}px, -9px)`,
-	});
-
-	function renderContainer() {
-		/**
-		 *
-		 */
-		const container = document.createElement("div");
-
-		Object.assign(container.style, {
-			position: "absolute",
-			display: "flex",
-			// backgroundColor: "red",
-			width: "auto",
-			height: "100%",
-		});
-
-		container.innerHTML = `
-					<span>
-						prs:
-					</span>
-					&nbsp;
-					<div>
-						${renderPRs()}
-					</div>
-				`.trim();
-
-		return container;
-
-		function renderPRs() {
-			return c.associatedPullRequests.map((pr) =>
-				`
-							<div>
-								<a href="${pr.url}">#${pr.number}</a>
-							</div>
-						`.trim()
-			);
-		}
-	}
-}
-
-function log(...xs) {
-	const DEBUG = true;
-	if (DEBUG) {
-		console.log(...xs);
-	}
-}
-
-/**
- * poor man's graphql
- * @param {string} x
- */
-function gql(x) {
-	return x[0].replace(/\t/g, "  ");
+	return commits;
 }
 
 function getQuery() {
@@ -220,9 +171,15 @@ function getQuery() {
 	`;
 }
 
-function getVariables({
-	commitListLength, //
-}) {
+/**
+ * poor man's graphql
+ * @param {string} x
+ */
+function gql(x) {
+	return x[0].replace(/\t/g, "  ");
+}
+
+function getVariables(commitListLength) {
 	const url = new URL(window.location.href);
 
 	/**
@@ -237,9 +194,6 @@ function getVariables({
 	const after = url.searchParams.get("after");
 	const before = url.searchParams.get("before");
 
-	/**
-	 * maybe not needed if in between before & after? tho prolly needed, thus count amount of items
-	 */
 	const first = commitListLength;
 
 	return {
@@ -252,4 +206,69 @@ function getVariables({
 
 		first,
 	};
+}
+
+function zip(A, B, zipper = (x) => x) {
+	console.assert(A.length === B.length);
+
+	const zipped = [];
+
+	for (let i = 0; i < A.length; i++) {
+		const a = A[i];
+		const b = B[i];
+
+		zipped.push(zipper([a, b]));
+	}
+
+	return zipped;
+}
+
+function render(el, c) {
+	Object.assign(el.el.style, {
+		position: "relative",
+	});
+
+	const cont = renderContainer();
+	el.el.appendChild(cont);
+
+	const containerWidth = Math.floor(cont.getBoundingClientRect().width);
+	const dx = -61 - containerWidth;
+	Object.assign(cont.style, {
+		transform: `translate(${dx}px, -9px)`,
+	});
+
+	return;
+
+	function renderContainer() {
+		const container = document.createElement("div");
+
+		Object.assign(container.style, {
+			position: "absolute",
+			display: "flex",
+			width: "auto",
+			height: "100%",
+		});
+
+		container.innerHTML = `
+			<span>
+				prs:
+			</span>
+			&nbsp;
+			<div>
+				${renderPRs()}
+			</div>
+		`.trim();
+
+		return container;
+
+		function renderPRs() {
+			return c.associatedPullRequests.map((pr) =>
+				`
+					<div>
+						<a href="${pr.url}">#${pr.number}</a>
+					</div>
+				`.trim()
+			);
+		}
+	}
 }
