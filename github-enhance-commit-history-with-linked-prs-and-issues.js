@@ -264,7 +264,7 @@ function render(el, c) {
 		function renderPRs() {
 			return c.associatedPullRequests.map((pr) =>
 				`
-					<div>
+					<div title="${pr.title}">
 						<a href="${pr.url}">#${pr.number}</a>
 					</div>
 				`.trim()
